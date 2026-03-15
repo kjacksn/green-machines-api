@@ -2,58 +2,46 @@ app.post("/lead", async (req, res) => {
 
   try {
 
-    console.log("Webhook received from Vapi")
+    console.log("Webhook received from Vapi");
 
-    const data = req.body
+    const data = req.body;
 
-    const outputs = data?.message?.artifact?.structuredOutputs
+    console.log("FULL PAYLOAD:");
+    console.log(JSON.stringify(data, null, 2));
 
-    if (!outputs) {
-      console.log("No structured output yet")
-      return res.sendStatus(200)
+    const transcript = data?.message?.artifact?.transcript;
+
+    if (!transcript) {
+      console.log("Transcript not ready yet");
+      return res.sendStatus(200);
     }
 
-    const lead = outputs["Green Machines Lead Intake"]?.result
-
-    if (!lead) {
-      console.log("Lead schema not completed yet")
-      return res.sendStatus(200)
-    }
-
-    console.log("Lead captured:")
-    console.log(lead)
-
-    const prompt = `
-Submit this lead to the Green Machines Lawn Care work request form.
-
-First Name: ${lead.firstName}
-Last Name: ${lead.lastName}
-Email: ${lead.email}
-Phone: ${lead.phone}
-Service Needed: ${lead.serviceNeeded}
-Tell us more: ${lead.tellUsMore || ""}
-Street Address: ${lead.streetAddress}
-City: ${lead.city}
-State: ${lead.state}
-Zip: ${lead.zip}
-Best Day for a visit: ${lead.bestDayForVisit}
-
-Open https://www.greenmachineslawncare.com/#GetaFreeQuote
-Fill the form and submit it.
-`
+    console.log("Transcript received:");
+    console.log(transcript);
 
     await openai.responses.create({
       model: "gpt-4.1",
-      input: prompt
-    })
+      input: `
+A phone call transcript for a lawn care lead is below.
 
-    res.sendStatus(200)
+Extract the customer details from this call and prepare them for a lawn care work request form.
+
+Transcript:
+${transcript}
+`
+    });
+
+    console.log("OpenAI API called successfully");
+
+    res.sendStatus(200);
 
   } catch (error) {
 
-    console.error("Error:", error)
-    res.sendStatus(500)
+    console.error("SERVER ERROR:");
+    console.error(error);
+
+    res.sendStatus(500);
 
   }
 
-})
+});
