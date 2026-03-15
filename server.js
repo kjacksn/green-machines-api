@@ -13,7 +13,7 @@ app.post("/lead", async (req, res) => {
       return res.sendStatus(200)
     }
 
-    const lead = outputs["Green Machines Lead Intake"]?.result
+    const lead = Object.values(outputs)[0]?.result
 
     if (!lead) {
       console.log("Lead schema not completed yet")
