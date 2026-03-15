@@ -1,27 +1,37 @@
+import express from "express";
+import OpenAI from "openai";
+
+const app = express();
+app.use(express.json());
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
 app.post("/lead", async (req, res) => {
 
   try {
 
-    console.log("Webhook received from Vapi")
+    console.log("Webhook received from Vapi");
 
-    const data = req.body
+    const data = req.body;
 
-    const outputs = data?.message?.artifact?.structuredOutputs
+    const outputs = data?.message?.artifact?.structuredOutputs;
 
     if (!outputs) {
-      console.log("No structured output yet")
-      return res.sendStatus(200)
+      console.log("No structured output yet");
+      return res.sendStatus(200);
     }
 
-    const lead = Object.values(outputs)[0]?.result
+    const lead = Object.values(outputs)[0]?.result;
 
     if (!lead) {
-      console.log("Lead schema not completed yet")
-      return res.sendStatus(200)
+      console.log("Lead schema not completed yet");
+      return res.sendStatus(200);
     }
 
-    console.log("Lead captured:")
-    console.log(lead)
+    console.log("Lead captured:");
+    console.log(lead);
 
     const prompt = `
 Submit this lead to the Green Machines Lawn Care work request form.
@@ -40,20 +50,26 @@ Best Day for a visit: ${lead.bestDayForVisit}
 
 Open https://www.greenmachineslawncare.com/#GetaFreeQuote
 Fill the form and submit it.
-`
+`;
 
     await openai.responses.create({
       model: "gpt-4.1",
       input: prompt
-    })
+    });
 
-    res.sendStatus(200)
+    console.log("OpenAI request sent");
+
+    res.sendStatus(200);
 
   } catch (error) {
 
-    console.error("Error:", error)
-    res.sendStatus(500)
+    console.error("Error:", error);
+    res.sendStatus(500);
 
   }
 
-})
+});
+
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
+});
