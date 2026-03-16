@@ -25,13 +25,18 @@ app.post("/lead", async (req, res) => {
 
     const lead = Object.values(outputs)[0]?.result;
 
-    if (!lead) {
-      console.log("Lead schema not completed yet");
-      return res.sendStatus(200);
-    }
+if (!lead) {
+  console.log("Lead schema not completed yet");
+  return res.sendStatus(200);
+}
 
-    console.log("Lead captured:");
-    console.log(lead);
+if (!lead.leadComplete) {
+  console.log("Lead not finished yet");
+  return res.sendStatus(200);
+}
+
+console.log("Lead captured:");
+console.log(lead);
 
     const prompt = `
 Submit this lead to the Green Machines Lawn Care work request form.
