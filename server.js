@@ -5,6 +5,8 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
+const COMPANY_ID = "549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f";
+
 function formatDate(dateString) {
   const date = new Date(dateString);
   return date.toLocaleDateString("en-US", {
@@ -21,7 +23,6 @@ app.post("/lead", async (req, res) => {
     console.log("Webhook received from Vapi");
 
     const data = req.body;
-
     const outputs = data?.message?.artifact?.structuredOutputs;
 
     if (!outputs) {
@@ -41,55 +42,26 @@ app.post("/lead", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    console.log("Lead captured:");
-    console.log(lead);
+    console.log("Lead captured:", lead);
 
     /* ------------------------------
-       STEP 1: LOAD EMBED PAGE
+       STEP 1: LOAD WIDGET SCRIPT
     ------------------------------ */
 
-    const session = await fetch(
-      "https://secure.lawnprosoftware.com/client/guest/requests/embedNew/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
-      {
-        method: "GET",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-          "Accept": "text/html",
-          "Accept-Language": "en-US,en;q=0.9"
-        }
-      }
+    const script = await fetch(
+      "https://secure.lawnprosoftware.com/widget/lp-requests_access_grant_0x.js"
     );
 
-    const rawCookie = session.headers.get("set-cookie");
-    const cookie = rawCookie ? rawCookie.split(";")[0] : "";
+    const scriptText = await script.text();
 
-    console.log("Session cookie obtained:", cookie);
+    const grantMatch = scriptText.match(/access_grant\s*=\s*"([^"]+)"/);
 
-    const html = await session.text();
+    const accessGrant = grantMatch ? grantMatch[1] : "0x";
 
-    /* ------------------------------
-       STEP 2: EXTRACT ALL HIDDEN FIELDS
-    ------------------------------ */
-
-    const hiddenInputs = [...html.matchAll(/<input[^>]+type="hidden"[^>]*>/g)];
-
-    const hiddenFields = {};
-
-    hiddenInputs.forEach(input => {
-
-      const nameMatch = input[0].match(/name="([^"]+)"/);
-      const valueMatch = input[0].match(/value="([^"]*)"/);
-
-      if (nameMatch && valueMatch) {
-        hiddenFields[nameMatch[1]] = valueMatch[1];
-      }
-
-    });
-
-    console.log("Hidden fields found:", hiddenFields);
+    console.log("Access grant:", accessGrant);
 
     /* ------------------------------
-       STEP 3: BUILD FORM
+       STEP 2: BUILD FORM
     ------------------------------ */
 
     const form = new FormData();
@@ -99,9 +71,9 @@ app.post("/lead", async (req, res) => {
     form.append("email", lead.email);
     form.append("phone", lead.phone);
     form.append("company_name", "");
+
     form.append("request_for", lead.serviceNeeded);
 
-    /* Fix "null" string issue */
     const details =
       lead.tellUsMore && lead.tellUsMore !== "null"
         ? lead.tellUsMore
@@ -110,45 +82,37 @@ app.post("/lead", async (req, res) => {
     form.append("request_details", details);
 
     form.append("request_frequency", "One time");
+
     form.append("addr_1", lead.streetAddress);
     form.append("addr_2", "");
     form.append("city", lead.city);
     form.append("state", lead.state);
     form.append("zip", lead.zip);
+
     form.append("appointment_date_1", formatDate(lead.bestDayForVisit));
     form.append("appointment_times[]", "Any time");
 
     form.append("gRecaptchaResponse", "");
 
-    /* Required LawnPro widget fields */
+    /* required LawnPro widget values */
 
-    form.append("access_grant", "0x");
-    form.append("request_company_id", "549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f");
-
-    /* append hidden fields from page */
-
-    Object.entries(hiddenFields).forEach(([key, value]) => {
-      form.append(key, value);
-    });
+    form.append("access_grant", accessGrant);
+    form.append("request_company_id", COMPANY_ID);
 
     /* ------------------------------
-       STEP 4: SUBMIT FORM
+       STEP 3: SUBMIT
     ------------------------------ */
 
     const response = await fetch(
-      "https://secure.lawnprosoftware.com/client/guest/requests/save/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
+      `https://secure.lawnprosoftware.com/client/guest/requests/save/${COMPANY_ID}`,
       {
         method: "POST",
         body: form,
         headers: {
           ...form.getHeaders(),
           "Origin": "https://secure.lawnprosoftware.com",
-          "Referer": "https://secure.lawnprosoftware.com/client/guest/requests/embedNew/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-          "Accept": "*/*",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Connection": "keep-alive",
-          "Cookie": cookie
+          "Referer": `https://secure.lawnprosoftware.com/client/guest/requests/embedNew/${COMPANY_ID}`,
+          "User-Agent": "Mozilla/5.0"
         }
       }
     );
