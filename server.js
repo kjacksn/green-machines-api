@@ -100,7 +100,15 @@ app.post("/lead", async (req, res) => {
     form.append("phone", lead.phone);
     form.append("company_name", "");
     form.append("request_for", lead.serviceNeeded);
-    form.append("request_details", lead.tellUsMore || "");
+
+    /* Fix "null" string issue */
+    const details =
+      lead.tellUsMore && lead.tellUsMore !== "null"
+        ? lead.tellUsMore
+        : "";
+
+    form.append("request_details", details);
+
     form.append("request_frequency", "One time");
     form.append("addr_1", lead.streetAddress);
     form.append("addr_2", "");
@@ -112,7 +120,12 @@ app.post("/lead", async (req, res) => {
 
     form.append("gRecaptchaResponse", "");
 
-    /* append hidden fields */
+    /* Required LawnPro widget fields */
+
+    form.append("access_grant", "0x");
+    form.append("request_company_id", "549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f");
+
+    /* append hidden fields from page */
 
     Object.entries(hiddenFields).forEach(([key, value]) => {
       form.append(key, value);
