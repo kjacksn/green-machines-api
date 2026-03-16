@@ -53,8 +53,8 @@ Fill the form and submit it.
 `;
 
     await openai.responses.create({
-      model: "gpt-4.1",
-      input: prompt
+  workflow_id: "wf_69b74f5952f881909eee9353dd0dfccd09c9e1dd76c1fdb6",
+  input: prompt
     });
 
     console.log("OpenAI request sent");
