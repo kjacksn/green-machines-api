@@ -5,9 +5,6 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-/* Convert "Tuesday, March 17, 2026"
-   → "Mar 17, 2026" (format LawnPro expects) */
-
 function formatDate(dateString) {
   const date = new Date(dateString);
   return date.toLocaleDateString("en-US", {
@@ -48,7 +45,7 @@ app.post("/lead", async (req, res) => {
     console.log(lead);
 
     /* ------------------------------
-       STEP 1: GET SESSION COOKIE
+       STEP 1: LOAD EMBED PAGE
     ------------------------------ */
 
     const session = await fetch(
@@ -56,7 +53,7 @@ app.post("/lead", async (req, res) => {
       {
         method: "GET",
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
           "Accept": "text/html",
           "Accept-Language": "en-US,en;q=0.9"
         }
@@ -68,17 +65,28 @@ app.post("/lead", async (req, res) => {
 
     console.log("Session cookie obtained:", cookie);
 
-    /* ------------------------------
-       STEP 2: EXTRACT FORM TOKEN
-    ------------------------------ */
-
     const html = await session.text();
 
-    const tokenMatch = html.match(/name="form_token" value="([^"]+)"/);
+    /* ------------------------------
+       STEP 2: EXTRACT ALL HIDDEN FIELDS
+    ------------------------------ */
 
-    const formToken = tokenMatch ? tokenMatch[1] : null;
+    const hiddenInputs = [...html.matchAll(/<input[^>]+type="hidden"[^>]*>/g)];
 
-    console.log("Form token:", formToken);
+    const hiddenFields = {};
+
+    hiddenInputs.forEach(input => {
+
+      const nameMatch = input[0].match(/name="([^"]+)"/);
+      const valueMatch = input[0].match(/value="([^"]*)"/);
+
+      if (nameMatch && valueMatch) {
+        hiddenFields[nameMatch[1]] = valueMatch[1];
+      }
+
+    });
+
+    console.log("Hidden fields found:", hiddenFields);
 
     /* ------------------------------
        STEP 3: BUILD FORM
@@ -102,16 +110,16 @@ app.post("/lead", async (req, res) => {
     form.append("appointment_date_1", formatDate(lead.bestDayForVisit));
     form.append("appointment_times[]", "Any time");
 
-    /* required hidden field */
-    if (formToken) {
-      form.append("form_token", formToken);
-    }
-
-    /* Some LawnPro installs allow blank captcha */
     form.append("gRecaptchaResponse", "");
 
+    /* append hidden fields */
+
+    Object.entries(hiddenFields).forEach(([key, value]) => {
+      form.append(key, value);
+    });
+
     /* ------------------------------
-       STEP 4: SUBMIT FORM WITH COOKIE
+       STEP 4: SUBMIT FORM
     ------------------------------ */
 
     const response = await fetch(
@@ -123,7 +131,7 @@ app.post("/lead", async (req, res) => {
           ...form.getHeaders(),
           "Origin": "https://secure.lawnprosoftware.com",
           "Referer": "https://secure.lawnprosoftware.com/client/guest/requests/embedNew/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
           "Accept": "*/*",
           "Accept-Language": "en-US,en;q=0.9",
           "Connection": "keep-alive",
