@@ -1,12 +1,21 @@
 import express from "express";
-import OpenAI from "openai";
+import fetch from "node-fetch";
+import FormData from "form-data";
 
 const app = express();
 app.use(express.json());
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+/* Convert "Tuesday, March 17, 2026"
+   → "Mar 17, 2026" (format LawnPro expects) */
+
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
 
 app.post("/lead", async (req, res) => {
 
@@ -25,44 +34,51 @@ app.post("/lead", async (req, res) => {
 
     const lead = Object.values(outputs)[0]?.result;
 
-if (!lead) {
-  console.log("Lead schema not completed yet");
-  return res.sendStatus(200);
-}
+    if (!lead) {
+      console.log("Lead schema not completed yet");
+      return res.sendStatus(200);
+    }
 
-if (!lead.leadComplete) {
-  console.log("Lead not finished yet");
-  return res.sendStatus(200);
-}
+    if (!lead.leadComplete) {
+      console.log("Lead not finished yet");
+      return res.sendStatus(200);
+    }
 
-console.log("Lead captured:");
-console.log(lead);
+    console.log("Lead captured:");
+    console.log(lead);
 
-    const prompt = `
-Submit this lead to the Green Machines Lawn Care work request form.
+    /* Build LawnPro form submission */
 
-First Name: ${lead.firstName}
-Last Name: ${lead.lastName}
-Email: ${lead.email}
-Phone: ${lead.phone}
-Service Needed: ${lead.serviceNeeded}
-Tell us more: ${lead.tellUsMore || ""}
-Street Address: ${lead.streetAddress}
-City: ${lead.city}
-State: ${lead.state}
-Zip: ${lead.zip}
-Best Day for a visit: ${lead.bestDayForVisit}
+    const form = new FormData();
 
-Open https://www.greenmachineslawncare.com/#GetaFreeQuote
-Fill the form and submit it.
-`;
+    form.append("first_name", lead.firstName);
+    form.append("last_name", lead.lastName);
+    form.append("email", lead.email);
+    form.append("phone", lead.phone);
+    form.append("company_name", "");
+    form.append("request_for", lead.serviceNeeded);
+    form.append("request_details", lead.tellUsMore || "");
+    form.append("request_frequency", "One time");
+    form.append("addr_1", lead.streetAddress);
+    form.append("addr_2", "");
+    form.append("city", lead.city);
+    form.append("state", lead.state);
+    form.append("zip", lead.zip);
+    form.append("appointment_date_1", formatDate(lead.bestDayForVisit));
+    form.append("appointment_times[]", "Any time");
 
-    await openai.responses.create({
-  model: "gpt-4.1",
-  input: prompt
-    });
+    /* Some LawnPro installs allow blank captcha */
+    form.append("gRecaptchaResponse", "");
 
-    console.log("OpenAI request sent");
+    const response = await fetch(
+      "https://secure.lawnprosoftware.com/client/guest/requests/save/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
+      {
+        method: "POST",
+        body: form
+      }
+    );
+
+    console.log("LawnPro submission status:", response.status);
 
     res.sendStatus(200);
 
