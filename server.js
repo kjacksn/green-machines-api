@@ -33,7 +33,9 @@ app.post("/lead", async (req, res) => {
     console.log("Lead captured:");
     console.log(lead);
 
-    const leadText = `
+    const prompt = `
+Submit this lead to the Green Machines Lawn Care work request form.
+
 First Name: ${lead.firstName}
 Last Name: ${lead.lastName}
 Email: ${lead.email}
@@ -45,16 +47,17 @@ City: ${lead.city}
 State: ${lead.state}
 Zip: ${lead.zip}
 Best Day for a visit: ${lead.bestDayForVisit}
+
+Open https://www.greenmachineslawncare.com/#GetaFreeQuote
+Fill the form and submit it.
 `;
 
     await openai.responses.create({
-      workflow_id: "wf_69b74f5952f881909eee9353dd0dfccd09c9e1dd76c1fdb6",
-      input: {
-        input_as_text: leadText
-      }
+      model: "gpt-4.1",
+      input: prompt
     });
 
-    console.log("Workflow triggered");
+    console.log("OpenAI request sent");
 
     res.sendStatus(200);
 
