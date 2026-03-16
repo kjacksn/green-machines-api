@@ -22,8 +22,7 @@ app.post("/lead", async (req, res) => {
 
     console.log("Webhook received from Vapi");
 
-    const data = req.body;
-    const outputs = data?.message?.artifact?.structuredOutputs;
+    const outputs = req.body?.message?.artifact?.structuredOutputs;
 
     if (!outputs) {
       console.log("No structured output yet");
@@ -44,25 +43,12 @@ app.post("/lead", async (req, res) => {
 
     console.log("Lead captured:", lead);
 
-    /* ------------------------------
-       STEP 1: LOAD WIDGET SCRIPT
-    ------------------------------ */
-
-    const script = await fetch(
-      "https://secure.lawnprosoftware.com/widget/lp-requests_access_grant_0x.js"
-    );
-
-    const scriptText = await script.text();
-
-    const grantMatch = scriptText.match(/access_grant\s*=\s*"([^"]+)"/);
-
-    const accessGrant = grantMatch ? grantMatch[1] : "0x";
-
-    console.log("Access grant:", accessGrant);
-
-    /* ------------------------------
-       STEP 2: BUILD FORM
-    ------------------------------ */
+    const details =
+      lead.tellUsMore &&
+      lead.tellUsMore !== "null" &&
+      lead.tellUsMore !== "No additional details provided."
+        ? lead.tellUsMore
+        : "";
 
     const form = new FormData();
 
@@ -73,14 +59,7 @@ app.post("/lead", async (req, res) => {
     form.append("company_name", "");
 
     form.append("request_for", lead.serviceNeeded);
-
-    const details =
-      lead.tellUsMore && lead.tellUsMore !== "null"
-        ? lead.tellUsMore
-        : "";
-
     form.append("request_details", details);
-
     form.append("request_frequency", "One time");
 
     form.append("addr_1", lead.streetAddress);
@@ -94,14 +73,11 @@ app.post("/lead", async (req, res) => {
 
     form.append("gRecaptchaResponse", "");
 
-    /* required LawnPro widget values */
+    /* REQUIRED LAWNPRO WIDGET FIELDS */
 
-    form.append("access_grant", accessGrant);
+    form.append("access_grant", "0x");
     form.append("request_company_id", COMPANY_ID);
-
-    /* ------------------------------
-       STEP 3: SUBMIT
-    ------------------------------ */
+    form.append("request_source", "embed");
 
     const response = await fetch(
       `https://secure.lawnprosoftware.com/client/guest/requests/save/${COMPANY_ID}`,
