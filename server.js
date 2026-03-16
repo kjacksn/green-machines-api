@@ -64,13 +64,24 @@ app.post("/lead", async (req, res) => {
     );
 
     const rawCookie = session.headers.get("set-cookie");
-
     const cookie = rawCookie ? rawCookie.split(";")[0] : "";
 
     console.log("Session cookie obtained:", cookie);
 
     /* ------------------------------
-       STEP 2: BUILD FORM
+       STEP 2: EXTRACT FORM TOKEN
+    ------------------------------ */
+
+    const html = await session.text();
+
+    const tokenMatch = html.match(/name="form_token" value="([^"]+)"/);
+
+    const formToken = tokenMatch ? tokenMatch[1] : null;
+
+    console.log("Form token:", formToken);
+
+    /* ------------------------------
+       STEP 3: BUILD FORM
     ------------------------------ */
 
     const form = new FormData();
@@ -91,11 +102,16 @@ app.post("/lead", async (req, res) => {
     form.append("appointment_date_1", formatDate(lead.bestDayForVisit));
     form.append("appointment_times[]", "Any time");
 
+    /* required hidden field */
+    if (formToken) {
+      form.append("form_token", formToken);
+    }
+
     /* Some LawnPro installs allow blank captcha */
     form.append("gRecaptchaResponse", "");
 
     /* ------------------------------
-       STEP 3: SUBMIT FORM WITH COOKIE
+       STEP 4: SUBMIT FORM WITH COOKIE
     ------------------------------ */
 
     const response = await fetch(
