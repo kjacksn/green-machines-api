@@ -1,19 +1,130 @@
 import express from "express";
-import fetch from "node-fetch";
-import FormData from "form-data";
+import { chromium } from "playwright";
 
 const app = express();
 app.use(express.json());
 
-const COMPANY_ID = "549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f";
+async function submitLeadWithPlaywright(lead) {
 
-function formatDate(dateString) {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
+
+  const page = await browser.newPage();
+
+  try {
+
+    console.log("Opening website...");
+
+    await page.goto(
+      "https://www.greenmachineslawncare.com/#GetaFreeQuote",
+      { waitUntil: "domcontentloaded", timeout: 60000 }
+    );
+
+    await page.waitForTimeout(5000);
+
+    console.log("Page loaded");
+
+    let frame = page.frames().find(f =>
+      f.url().includes("lawnprosoftware.com")
+    );
+
+    if (!frame) {
+      frame = page.mainFrame();
+    }
+
+    console.log("Filling form");
+
+    await frame.locator('input[name="first_name"]').fill(lead.firstName || "");
+    await frame.locator('input[name="last_name"]').fill(lead.lastName || "");
+    await frame.locator('input[name="email"]').fill(lead.email || "");
+    await frame.locator('input[name="phone"]').fill(lead.phone || "");
+
+    await frame.locator('input[name="addr_1"]').fill(lead.streetAddress || "");
+    await frame.locator('input[name="city"]').fill(lead.city || "");
+    await frame.locator('input[name="state"]').fill(lead.state || "");
+    await frame.locator('input[name="zip"]').fill(lead.zip || "");
+
+    const serviceField = frame.locator('[name="request_for"]');
+    const serviceTag = await serviceField.evaluate(el => el.tagName.toLowerCase());
+
+    if (serviceTag === "select") {
+      await serviceField.selectOption({ label: lead.serviceNeeded });
+    } else {
+      await serviceField.fill(lead.serviceNeeded || "");
+    }
+
+    const details =
+      lead.tellUsMore &&
+      lead.tellUsMore !== "null" &&
+      lead.tellUsMore !== "No additional details provided."
+        ? lead.tellUsMore
+        : "";
+
+    await frame.locator('[name="request_details"]').fill(details);
+
+    const freqField = frame.locator('[name="request_frequency"]');
+
+    if (await freqField.count()) {
+      const tag = await freqField.evaluate(el => el.tagName.toLowerCase());
+
+      if (tag === "select") {
+        await freqField.selectOption({ label: "One time" });
+      } else {
+        await freqField.fill("One time");
+      }
+    }
+
+    const dateField = frame.locator('[name="appointment_date_1"]');
+
+    if (await dateField.count()) {
+      await dateField.fill(lead.bestDayForVisit || "");
+    }
+
+    const timeField = frame.locator('[name="appointment_times[]"]');
+
+    if (await timeField.count()) {
+      const tag = await timeField.evaluate(el => el.tagName.toLowerCase());
+
+      if (tag === "select") {
+        await timeField.selectOption({ label: "Any time" }).catch(() => {});
+      }
+    }
+
+    console.log("Taking screenshot before submit");
+
+    await page.screenshot({
+      path: "/tmp/before-submit.png",
+      fullPage: true
+    });
+
+    const submitButton =
+      frame.locator('button[type="submit"], input[type="submit"]').first();
+
+    await submitButton.click();
+
+    await page.waitForTimeout(5000);
+
+    console.log("Taking screenshot after submit");
+
+    await page.screenshot({
+      path: "/tmp/after-submit.png",
+      fullPage: true
+    });
+
+    console.log("Submission attempted");
+
+  } catch (error) {
+
+    console.error("Playwright error:", error);
+
+  } finally {
+
+    await browser.close();
+
+  }
+
 }
 
 app.post("/lead", async (req, res) => {
@@ -43,66 +154,13 @@ app.post("/lead", async (req, res) => {
 
     console.log("Lead captured:", lead);
 
-    const details =
-      lead.tellUsMore &&
-      lead.tellUsMore !== "null" &&
-      lead.tellUsMore !== "No additional details provided."
-        ? lead.tellUsMore
-        : "";
-
-    const form = new FormData();
-
-    form.append("first_name", lead.firstName);
-    form.append("last_name", lead.lastName);
-    form.append("email", lead.email);
-    form.append("phone", lead.phone);
-    form.append("company_name", "");
-
-    form.append("request_for", lead.serviceNeeded);
-    form.append("request_details", details);
-    form.append("request_frequency", "One time");
-
-    form.append("addr_1", lead.streetAddress);
-    form.append("addr_2", "");
-    form.append("city", lead.city);
-    form.append("state", lead.state);
-    form.append("zip", lead.zip);
-
-    form.append("appointment_date_1", formatDate(lead.bestDayForVisit));
-    form.append("appointment_times[]", "Any time");
-
-    form.append("gRecaptchaResponse", "");
-
-    /* REQUIRED LAWNPRO WIDGET FIELDS */
-
-    form.append("access_grant", "0x");
-    form.append("request_company_id", COMPANY_ID);
-    form.append("request_source", "embed");
-
-    const response = await fetch(
-      `https://secure.lawnprosoftware.com/client/guest/requests/save/${COMPANY_ID}`,
-      {
-        method: "POST",
-        body: form,
-        headers: {
-          ...form.getHeaders(),
-          "Origin": "https://secure.lawnprosoftware.com",
-          "Referer": `https://secure.lawnprosoftware.com/client/guest/requests/embedNew/${COMPANY_ID}`,
-          "User-Agent": "Mozilla/5.0"
-        }
-      }
-    );
-
-    const responseText = await response.text();
-
-    console.log("LawnPro submission status:", response.status);
-    console.log("LawnPro response:", responseText);
+    await submitLeadWithPlaywright(lead);
 
     res.sendStatus(200);
 
   } catch (error) {
 
-    console.error("Error:", error);
+    console.error("Server error:", error);
     res.sendStatus(500);
 
   }
