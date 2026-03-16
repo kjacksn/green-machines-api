@@ -5,9 +5,6 @@ import FormData from "form-data";
 const app = express();
 app.use(express.json());
 
-/* Prevent duplicate submissions from webhook spam */
-let lastLeadPhone = null;
-
 /* Convert "Tuesday, March 17, 2026"
    → "Mar 17, 2026" (format LawnPro expects) */
 
@@ -24,36 +21,53 @@ app.post("/lead", async (req, res) => {
 
   try {
 
+    console.log("Webhook received from Vapi");
+
     const data = req.body;
 
     const outputs = data?.message?.artifact?.structuredOutputs;
 
     if (!outputs) {
+      console.log("No structured output yet");
       return res.sendStatus(200);
     }
 
     const lead = Object.values(outputs)[0]?.result;
 
     if (!lead) {
+      console.log("Lead schema not completed yet");
       return res.sendStatus(200);
     }
 
     if (!lead.leadComplete) {
+      console.log("Lead not finished yet");
       return res.sendStatus(200);
     }
-
-    /* Prevent duplicate submissions */
-    if (lastLeadPhone === lead.phone) {
-      console.log("Duplicate lead ignored");
-      return res.sendStatus(200);
-    }
-
-    lastLeadPhone = lead.phone;
 
     console.log("Lead captured:");
     console.log(lead);
 
-    /* Build LawnPro form submission */
+    /* ------------------------------
+       STEP 1: GET SESSION COOKIE
+    ------------------------------ */
+
+    const session = await fetch(
+      "https://secure.lawnprosoftware.com/client/guest/requests/embedNew/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
+      {
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0"
+        }
+      }
+    );
+
+    const cookie = session.headers.get("set-cookie");
+
+    console.log("Session cookie obtained");
+
+    /* ------------------------------
+       STEP 2: BUILD FORM
+    ------------------------------ */
 
     const form = new FormData();
 
@@ -76,6 +90,10 @@ app.post("/lead", async (req, res) => {
     /* Some LawnPro installs allow blank captcha */
     form.append("gRecaptchaResponse", "");
 
+    /* ------------------------------
+       STEP 3: SUBMIT FORM WITH COOKIE
+    ------------------------------ */
+
     const response = await fetch(
       "https://secure.lawnprosoftware.com/client/guest/requests/save/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
       {
@@ -85,7 +103,8 @@ app.post("/lead", async (req, res) => {
           ...form.getHeaders(),
           "Origin": "https://secure.lawnprosoftware.com",
           "Referer": "https://secure.lawnprosoftware.com/client/guest/requests/embedNew/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
-          "User-Agent": "Mozilla/5.0"
+          "User-Agent": "Mozilla/5.0",
+          "Cookie": cookie
         }
       }
     );
