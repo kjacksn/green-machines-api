@@ -56,14 +56,18 @@ app.post("/lead", async (req, res) => {
       {
         method: "GET",
         headers: {
-          "User-Agent": "Mozilla/5.0"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Accept": "text/html",
+          "Accept-Language": "en-US,en;q=0.9"
         }
       }
     );
 
-    const cookie = session.headers.get("set-cookie");
+    const rawCookie = session.headers.get("set-cookie");
 
-    console.log("Session cookie obtained");
+    const cookie = rawCookie ? rawCookie.split(";")[0] : "";
+
+    console.log("Session cookie obtained:", cookie);
 
     /* ------------------------------
        STEP 2: BUILD FORM
@@ -103,7 +107,10 @@ app.post("/lead", async (req, res) => {
           ...form.getHeaders(),
           "Origin": "https://secure.lawnprosoftware.com",
           "Referer": "https://secure.lawnprosoftware.com/client/guest/requests/embedNew/549b4d30-D2eb-4df5-B6a1-3d0ddbb5dc8f",
-          "User-Agent": "Mozilla/5.0",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Accept": "*/*",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Connection": "keep-alive",
           "Cookie": cookie
         }
       }
