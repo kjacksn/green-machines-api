@@ -48,8 +48,7 @@ Best Day for a visit: ${lead.bestDayForVisit}
 `;
 
     await openai.responses.create({
-      model: "gpt-4.1",
-      workflow: "Green Machines Form Agent",
+      workflow_id: "wf_69b74f5952f881909eee9353dd0dfccd09c9e1dd76c1fdb6",
       input: {
         input_as_text: leadText
       }
