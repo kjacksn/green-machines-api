@@ -1,10 +1,45 @@
+import twilio from "twilio";
+
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+async function sendSMS(lead) {
+  try {
+    const message = `Hey ${lead.firstName}, this is Mac with Green Machines.
+
+Got your request for ${lead.serviceNeeded} 👍
+
+We’ll take a look at your property and follow up shortly with details.`;
+
+    await client.messages.create({
+      body: message,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      const cleanPhone = lead.phone.replace(/\D/g, "").slice(-10);
+
+await client.messages.create({
+  body: message,
+  from: process.env.TWILIO_PHONE_NUMBER,
+  to: `+1${cleanPhone}`
+});
+
+    console.log("SMS sent successfully");
+  } catch (error) {
+    console.error("SMS failed:", error.message);
+  }
+}
+
 import express from "express";
 import { chromium } from "playwright";
 
 const app = express();
 app.use(express.json());
 
-const processedCalls = new Set();
+processedCalls.add(callId);
+
+setTimeout(() => {
+  processedCalls.delete(callId);
+}, 1000 * 60 * 10); // 10 minutes
 
 /* KEEP BROWSER ALIVE */
 let browser;
@@ -137,7 +172,8 @@ app.post("/lead", async (req, res) => {
 
     console.log("Lead captured:", lead);
 
-    await submitLeadWithPlaywright(lead);
+    await sendSMS(lead).catch(() => {});
+await submitLeadWithPlaywright(lead);
 
     res.sendStatus(200);
 
