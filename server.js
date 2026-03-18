@@ -20,18 +20,17 @@ async function sendSMS(lead) {
 
     const message = `Hey ${lead.firstName}, this is Mac with Green Machines.
 
-Got your request for ${lead.serviceNeeded} 👍
+Got your request for ${lead.serviceNeeded}.
 
 We’ll take a look at your property and follow up shortly with details.`;
 
-    await client.messages.create({
+    const result = await client.messages.create({
       body: message,
       from: process.env.TWILIO_PHONE_NUMBER,
       to: `+1${cleanPhone}`
     });
 
-    console.log("SMS sent successfully");
-
+    console.log("SMS sent successfully:", result.sid);
   } catch (error) {
     console.error("SMS failed:", error.message);
   }
@@ -50,14 +49,27 @@ async function startBrowser() {
   console.log("Chromium started");
 }
 
+async function getLawnProFrame(page) {
+  const frameHandle = await page.waitForSelector(
+    'iframe[src*="lawnprosoftware"]',
+    { timeout: 60000 }
+  );
+
+  const frame = await frameHandle.contentFrame();
+
+  if (!frame) {
+    throw new Error("Could not get LawnPro iframe content");
+  }
+
+  return frame;
+}
+
 /* ================= FORM ================= */
 
 async function submitLeadWithPlaywright(lead) {
-
   const page = await browser.newPage();
 
   try {
-
     console.log("Opening website...");
 
     await page.goto(
@@ -65,17 +77,10 @@ async function submitLeadWithPlaywright(lead) {
       { waitUntil: "domcontentloaded", timeout: 60000 }
     );
 
-    /* ✅ PROPER IFRAME HANDLING (NO MORE GUESSING) */
-    const frameHandle = await page.waitForSelector(
-      'iframe[src*="lawnprosoftware"]',
-      { timeout: 60000 }
-    );
-
-    const frame = await frameHandle.contentFrame();
-
+    /* STEP 1 */
+    let frame = await getLawnProFrame(page);
     await frame.waitForSelector('input[name="first_name"]', { timeout: 60000 });
 
-    /* STEP 1 */
     console.log("Filling step 1");
 
     await frame.locator('input[name="first_name"]').fill(lead.firstName);
@@ -85,18 +90,36 @@ async function submitLeadWithPlaywright(lead) {
 
     await frame.locator('button.lh-btn-next:visible').click();
 
-    /* STEP 2 */
+    /* STEP 2 - reacquire frame after next click */
+    frame = await getLawnProFrame(page);
+    await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
+      timeout: 60000
+    });
+
     console.log("Filling step 2");
 
     await frame.locator(`label:has(input[value="${lead.serviceNeeded}"])`).click();
 
-    await frame.locator('[name="request_details"]').fill(
-      lead.tellUsMore || ""
-    );
+    const details =
+      lead.tellUsMore &&
+      lead.tellUsMore !== "null" &&
+      lead.tellUsMore !== "No additional details provided."
+        ? lead.tellUsMore
+        : "";
+
+    if (details) {
+      const detailsField = frame.locator('[name="request_details"]');
+      if (await detailsField.count()) {
+        await detailsField.fill(details);
+      }
+    }
 
     await frame.locator('button.lh-btn-next:visible').click();
 
-    /* STEP 3 */
+    /* STEP 3 - reacquire frame again */
+    frame = await getLawnProFrame(page);
+    await frame.waitForSelector('input[name="addr_1"]', { timeout: 60000 });
+
     console.log("Filling step 3");
 
     await frame.locator('input[name="addr_1"]').fill(lead.streetAddress);
@@ -116,7 +139,6 @@ async function submitLeadWithPlaywright(lead) {
     await page.waitForTimeout(4000);
 
     console.log("Submission attempted");
-
   } catch (error) {
     console.error("Playwright error:", error);
   } finally {
@@ -127,9 +149,7 @@ async function submitLeadWithPlaywright(lead) {
 /* ================= WEBHOOK ================= */
 
 app.post("/lead", async (req, res) => {
-
   try {
-
     console.log("Webhook received");
 
     const callId = req.body?.call?.id;
@@ -160,8 +180,6 @@ app.post("/lead", async (req, res) => {
 
     console.log("Lead captured:", lead);
 
-    /* ================= SAFEGUARDS ================= */
-
     const missingFields = [];
 
     if (!lead.phone) missingFields.push("phone");
@@ -171,24 +189,21 @@ app.post("/lead", async (req, res) => {
     if (!lead.zip) missingFields.push("zip");
 
     if (missingFields.length > 0) {
-      console.log("❌ Incomplete lead — skipping automation:", missingFields);
+      console.log("Incomplete lead — skipping automation:", missingFields);
       return res.sendStatus(200);
     }
 
     const cleanPhone = lead.phone.replace(/\D/g, "");
 
     if (cleanPhone.length !== 10) {
-      console.log("❌ Invalid phone number — skipping:", lead.phone);
+      console.log("Invalid phone number — skipping:", lead.phone);
       return res.sendStatus(200);
     }
-
-    /* ================= EXECUTION ================= */
 
     await sendSMS(lead).catch(() => {});
     await submitLeadWithPlaywright(lead);
 
     res.sendStatus(200);
-
   } catch (error) {
     console.error("Server error:", error);
     res.sendStatus(500);
