@@ -191,10 +191,10 @@ app.post("/lead", async (req, res) => {
     }
 
     /* ✅ PRICE ACCEPTANCE FILTER */
-    if (!lead.priceAccepted) {
-      console.log("Price not accepted — skipping");
-      return res.sendStatus(200);
-    }
+    if (!lead.serviceNeeded) {
+  console.log("No service selected — skipping");
+  return res.sendStatus(200);
+}
 
     console.log("Lead captured:", lead);
 
