@@ -1,260 +1,178 @@
-import twilio from "twilio";
-import express from "express";
-import { chromium } from "playwright";
+import twilio from "twilio";import express from "express";import { chromium } from "playwright";
 
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+const client = twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN);
 
-const app = express();
-app.use(express.json());
+const app = express();app.use(express.json());
 
 const processedCalls = new Set();
 
 /* ================= SMS ================= */
 
-async function sendSMS(lead) {
-  try {
-    const cleanPhone = lead.phone.replace(/\D/g, "").slice(-10);
+async function sendSMS(lead) {try {const cleanPhone = lead.phone.replace(/\D/g, "").slice(-10);
 
-    const message = `Hey ${lead.firstName}, this is Mac with Green Machines.
+const message = `Hey ${lead.firstName}, this is Mac with Green Machines.
 
-You're set for ${lead.serviceNeeded}.
+Got your request for ${lead.serviceNeeded}.
 
-Check your email to add your card on file so we can get your service started.`;
+We’ll take a look at your property and follow up shortly with details.`;
 
-    const result = await client.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: `+1${cleanPhone}`
-    });
+const result = await client.messages.create({
+  body: message,
+  from: process.env.TWILIO_PHONE_NUMBER,
+  to: `+1${cleanPhone}`
+});
 
-    console.log("SMS sent successfully:", result.sid);
-  } catch (error) {
-    console.error("SMS failed:", error.message);
-  }
-}
+console.log("SMS sent successfully:", result.sid);
+
+} catch (error) {console.error("SMS failed:", error.message);}}
 
 /* ================= BROWSER ================= */
 
 let browser;
 
-async function startBrowser() {
-  browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
+async function startBrowser() {browser = await chromium.launch({headless: true,args: ["--no-sandbox", "--disable-setuid-sandbox"]});
 
-  console.log("Chromium started");
-}
+console.log("Chromium started");}
 
-async function getLawnProFrame(page) {
-  // Ensure page is fully loaded before searching
-  await page.waitForLoadState("networkidle");
+async function getLawnProFrame(page) {const frameHandle = await page.waitForSelector('iframe[src*="lawnprosoftware"]',{ timeout: 60000 });
 
-  // Debug: how many iframes exist
-  const iframeCount = await page.locator("iframe").count();
-  console.log(`Found ${iframeCount} iframes on page`);
+const frame = await frameHandle.contentFrame();
 
-  for (let i = 0; i < 3; i++) {
-    try {
-      console.log(`Attempt ${i + 1} to acquire iframe`);
+if (!frame) {throw new Error("Could not get LawnPro iframe content");}
 
-      // Use flexible selector (not brittle exact match)
-      const frameHandle = await page.waitForSelector("iframe", {
-        state: "visible",
-        timeout: 20000
-      });
+return frame;}
 
-      const frame = await frameHandle.contentFrame();
-
-      if (!frame) {
-        throw new Error("Iframe found but contentFrame() returned null");
-      }
-
-      // Ensure form inside iframe is actually loaded
-      await frame.waitForSelector("input, button", {
-        timeout: 30000
-      });
-
-      console.log("LawnPro iframe acquired successfully");
-      return frame;
-
-    } catch (err) {
-      console.log(`Iframe attempt ${i + 1} failed: ${err.message}`);
-    }
-  }
-
-  throw new Error("Failed to acquire LawnPro iframe after retries");
-}
 /* ================= FORM ================= */
 
-async function submitLeadWithPlaywright(lead) {
-  const page = await browser.newPage();
+async function submitLeadWithPlaywright(lead) {const page = await browser.newPage();
 
-  try {
-    console.log("Opening website...");
+try {console.log("Opening website...");
 
-    await page.goto(
-      "https://www.greenmachineslawncare.com/#GetaFreeQuote",
-      { waitUntil: "domcontentloaded", timeout: 60000 }
-    );
+await page.goto(
+  "https://www.greenmachineslawncare.com/#GetaFreeQuote",
+  { waitUntil: "networkidle", timeout: 60000 }
+);
 
-    /* STEP 1 */
-    let frame = await getLawnProFrame(page);
-    await frame.waitForSelector('input[name="first_name"]', { timeout: 60000 });
+/* STEP 1 */
+let frame = await getLawnProFrame(page);
+await frame.waitForSelector('input[name="first_name"]', { timeout: 60000 });
 
-    console.log("Filling step 1");
+console.log("Filling step 1");
 
-    await frame.locator('input[name="first_name"]').fill(lead.firstName);
-    await frame.locator('input[name="last_name"]').fill(lead.lastName);
-    await frame.locator('input[name="email"]').fill(lead.email);
-    await frame.locator('input[name="phone"]').fill(lead.phone);
+await frame.locator('input[name="first_name"]').fill(lead.firstName);
+await frame.locator('input[name="last_name"]').fill(lead.lastName);
+await frame.locator('input[name="email"]').fill(lead.email);
+await frame.locator('input[name="phone"]').fill(lead.phone);
 
-    await frame.locator('button.lh-btn-next:visible').click();
+await frame.locator('button.lh-btn-next:visible').click();
 
-    /* STEP 2 */
-    frame = await getLawnProFrame(page);
-    await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
-      timeout: 60000
-    });
+/* STEP 2 - reacquire frame after next click */
+frame = await getLawnProFrame(page);
+await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
+  timeout: 60000
+});
 
-    console.log("Filling step 2");
-    console.log("Selected service:", lead.serviceNeeded);
+console.log("Filling step 2");
 
-    await frame.locator(`label:has(input[value="${lead.serviceNeeded}"])`).click();
+await frame.locator(`text=${lead.serviceNeeded}`).first().click();
 
-    const details =
-      lead.tellUsMore &&
-      lead.tellUsMore !== "null" &&
-      lead.tellUsMore !== "No additional details provided."
-        ? lead.tellUsMore
-        : "";
+const details =
+  lead.tellUsMore &&
+  lead.tellUsMore !== "null" &&
+  lead.tellUsMore !== "No additional details provided."
+    ? lead.tellUsMore
+    : "";
 
-    if (details) {
-      const detailsField = frame.locator('[name="request_details"]');
-      if (await detailsField.count()) {
-        await detailsField.fill(details);
-      }
-    }
-
-    await frame.locator('button.lh-btn-next:visible').click();
-
-    /* STEP 3 */
-    frame = await getLawnProFrame(page);
-    await frame.waitForSelector('input[name="addr_1"]', { timeout: 60000 });
-
-    console.log("Filling step 3");
-
-    await frame.locator('input[name="addr_1"]').fill(lead.streetAddress);
-    await frame.locator('input[name="city"]').fill(lead.city);
-    await frame.locator('input[name="state"]').fill(lead.state);
-    await frame.locator('input[name="zip"]').fill(lead.zip);
-
-    /* ✅ TERMS CHECKBOX */
-    console.log("Checking terms of service");
-
-    const terms = frame.locator(
-      'label:has-text("Pricing is subject to adjustment")'
-    );
-
-    if (await terms.count()) {
-      await terms.click();
-    } else {
-      const checkbox = frame.locator('input[type="checkbox"]');
-      if (await checkbox.count()) {
-        await checkbox.first().check();
-      }
-    }
-
-    console.log("Submitting form");
-
-    await frame.locator('button:has-text("Submit Request")').click();
-
-    await page.waitForTimeout(4000);
-
-    console.log("Submission attempted");
-  } catch (error) {
-    console.error("Playwright error:", error);
-  } finally {
-    await page.close();
+if (details) {
+  const detailsField = frame.locator('[name="request_details"]');
+  if (await detailsField.count()) {
+    await detailsField.fill(details);
   }
 }
+
+await frame.locator('button.lh-btn-next:visible').click();
+
+/* STEP 3 - reacquire frame again */
+frame = await getLawnProFrame(page);
+await frame.waitForSelector('input[name="addr_1"]', { timeout: 60000 });
+
+console.log("Filling step 3");
+
+await frame.locator('input[name="addr_1"]').fill(lead.streetAddress);
+await frame.locator('input[name="city"]').fill(lead.city);
+await frame.locator('input[name="state"]').fill(lead.state);
+await frame.locator('input[name="zip"]').fill(lead.zip);
+await frame.locator('input[type="checkbox"]').check();
+
+console.log("Submitting form");
+
+await frame.locator('button:has-text("Submit")').click();
+
+await page.waitForTimeout(4000);
+
+console.log("Submission attempted");
+
+} catch (error) {console.error("Playwright error:", error);} finally {await page.close();}}
 
 /* ================= WEBHOOK ================= */
 
-app.post("/lead", async (req, res) => {
-  try {
-    console.log("Webhook received");
+app.post("/lead", async (req, res) => {try {console.log("Webhook received");
 
-    const callId = req.body?.call?.id;
+const callId = req.body?.call?.id;
 
-    if (callId && processedCalls.has(callId)) {
-      console.log("Duplicate ignored");
-      return res.sendStatus(200);
-    }
-
-    if (callId) {
-      processedCalls.add(callId);
-
-      setTimeout(() => {
-        processedCalls.delete(callId);
-      }, 1000 * 60 * 10);
-    }
-
-    const outputs = req.body?.message?.artifact?.structuredOutputs;
-
-    if (!outputs) return res.sendStatus(200);
-
-    const lead = Object.values(outputs)[0]?.result;
-
-    if (!lead || !lead.leadComplete) {
-      console.log("Lead not complete yet");
-      return res.sendStatus(200);
-    }
-
-    /* ✅ PRICE ACCEPTANCE FILTER */
-    if (!lead.serviceNeeded) {
-  console.log("No service selected — skipping");
+if (callId && processedCalls.has(callId)) {
+  console.log("Duplicate ignored");
   return res.sendStatus(200);
 }
 
-    console.log("Lead captured:", lead);
+if (callId) {
+  processedCalls.add(callId);
 
-    const missingFields = [];
+  setTimeout(() => {
+    processedCalls.delete(callId);
+  }, 1000 * 60 * 10);
+}
 
-    if (!lead.phone) missingFields.push("phone");
-    if (!lead.streetAddress) missingFields.push("streetAddress");
-    if (!lead.city) missingFields.push("city");
-    if (!lead.state) missingFields.push("state");
-    if (!lead.zip) missingFields.push("zip");
+const outputs = req.body?.message?.artifact?.structuredOutputs;
 
-    if (missingFields.length > 0) {
-      console.log("Incomplete lead — skipping automation:", missingFields);
-      return res.sendStatus(200);
-    }
+if (!outputs) return res.sendStatus(200);
 
-    const cleanPhone = lead.phone.replace(/\D/g, "");
+const lead = Object.values(outputs)[0]?.result;
 
-    if (cleanPhone.length !== 10) {
-      console.log("Invalid phone number — skipping:", lead.phone);
-      return res.sendStatus(200);
-    }
+if (!lead || !lead.leadComplete) {
+  console.log("Lead not complete yet");
+  return res.sendStatus(200);
+}
 
-    await sendSMS(lead).catch(() => {});
-    await submitLeadWithPlaywright(lead);
+console.log("Lead captured:", lead);
 
-    res.sendStatus(200);
-  } catch (error) {
-    console.error("Server error:", error);
-    res.sendStatus(500);
-  }
-});
+const missingFields = [];
+
+if (!lead.phone) missingFields.push("phone");
+if (!lead.streetAddress) missingFields.push("streetAddress");
+if (!lead.city) missingFields.push("city");
+if (!lead.state) missingFields.push("state");
+if (!lead.zip) missingFields.push("zip");
+
+if (missingFields.length > 0) {
+  console.log("Incomplete lead — skipping automation:", missingFields);
+  return res.sendStatus(200);
+}
+
+const cleanPhone = lead.phone.replace(/\D/g, "");
+
+if (cleanPhone.length !== 10) {
+  console.log("Invalid phone number — skipping:", lead.phone);
+  return res.sendStatus(200);
+}
+
+await sendSMS(lead).catch(() => {});
+await submitLeadWithPlaywright(lead);
+
+res.sendStatus(200);
+
+} catch (error) {console.error("Server error:", error);res.sendStatus(500);}});
 
 /* ================= START ================= */
 
-app.listen(3000, async () => {
-  console.log("Server running on port 3000");
-  await startBrowser();
-});
+app.listen(3000, async () => {console.log("Server running on port 3000");await startBrowser();});
