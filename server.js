@@ -20,9 +20,9 @@ async function sendSMS(lead) {
 
     const message = `Hey ${lead.firstName}, this is Mac with Green Machines.
 
-Got your request for ${lead.serviceNeeded}.
+You're set for ${lead.serviceNeeded}.
 
-We’ll take a look at your property and follow up shortly with details.`;
+Check your email to add your card on file so we can get your service started.`;
 
     const result = await client.messages.create({
       body: message,
@@ -90,13 +90,14 @@ async function submitLeadWithPlaywright(lead) {
 
     await frame.locator('button.lh-btn-next:visible').click();
 
-    /* STEP 2 - reacquire frame after next click */
+    /* STEP 2 */
     frame = await getLawnProFrame(page);
     await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
       timeout: 60000
     });
 
     console.log("Filling step 2");
+    console.log("Selected service:", lead.serviceNeeded);
 
     await frame.locator(`label:has(input[value="${lead.serviceNeeded}"])`).click();
 
@@ -116,7 +117,7 @@ async function submitLeadWithPlaywright(lead) {
 
     await frame.locator('button.lh-btn-next:visible').click();
 
-    /* STEP 3 - reacquire frame again */
+    /* STEP 3 */
     frame = await getLawnProFrame(page);
     await frame.waitForSelector('input[name="addr_1"]', { timeout: 60000 });
 
@@ -127,10 +128,21 @@ async function submitLeadWithPlaywright(lead) {
     await frame.locator('input[name="state"]').fill(lead.state);
     await frame.locator('input[name="zip"]').fill(lead.zip);
 
-    await frame.locator('[name="appointment_date_1"]').click();
-    await frame.locator('.ui-datepicker-today a').click();
+    /* ✅ TERMS CHECKBOX */
+    console.log("Checking terms of service");
 
-    await frame.locator('label:has-text("Anytime")').click();
+    const terms = frame.locator(
+      'label:has-text("Pricing is subject to adjustment")'
+    );
+
+    if (await terms.count()) {
+      await terms.click();
+    } else {
+      const checkbox = frame.locator('input[type="checkbox"]');
+      if (await checkbox.count()) {
+        await checkbox.first().check();
+      }
+    }
 
     console.log("Submitting form");
 
@@ -175,6 +187,12 @@ app.post("/lead", async (req, res) => {
 
     if (!lead || !lead.leadComplete) {
       console.log("Lead not complete yet");
+      return res.sendStatus(200);
+    }
+
+    /* ✅ PRICE ACCEPTANCE FILTER */
+    if (!lead.priceAccepted) {
+      console.log("Price not accepted — skipping");
       return res.sendStatus(200);
     }
 
