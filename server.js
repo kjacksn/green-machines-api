@@ -50,20 +50,44 @@ async function startBrowser() {
 }
 
 async function getLawnProFrame(page) {
-  const frameHandle = await page.waitForSelector(
-    'iframe[src*="lawnprosoftware"]',
-    { timeout: 60000 }
-  );
+  // Ensure page is fully loaded before searching
+  await page.waitForLoadState("networkidle");
 
-  const frame = await frameHandle.contentFrame();
+  // Debug: how many iframes exist
+  const iframeCount = await page.locator("iframe").count();
+  console.log(`Found ${iframeCount} iframes on page`);
 
-  if (!frame) {
-    throw new Error("Could not get LawnPro iframe content");
+  for (let i = 0; i < 3; i++) {
+    try {
+      console.log(`Attempt ${i + 1} to acquire iframe`);
+
+      // Use flexible selector (not brittle exact match)
+      const frameHandle = await page.waitForSelector("iframe", {
+        state: "visible",
+        timeout: 20000
+      });
+
+      const frame = await frameHandle.contentFrame();
+
+      if (!frame) {
+        throw new Error("Iframe found but contentFrame() returned null");
+      }
+
+      // Ensure form inside iframe is actually loaded
+      await frame.waitForSelector("input, button", {
+        timeout: 30000
+      });
+
+      console.log("LawnPro iframe acquired successfully");
+      return frame;
+
+    } catch (err) {
+      console.log(`Iframe attempt ${i + 1} failed: ${err.message}`);
+    }
   }
 
-  return frame;
+  throw new Error("Failed to acquire LawnPro iframe after retries");
 }
-
 /* ================= FORM ================= */
 
 async function submitLeadWithPlaywright(lead) {
