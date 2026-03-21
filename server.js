@@ -1,4 +1,6 @@
-import twilio from "twilio";import express from "express";import { chromium } from "playwright";
+import twilio from "twilio";
+import express from "express";
+import { chromium } from "playwright";
 
 const client = twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN);
 
@@ -6,25 +8,17 @@ const app = express();app.use(express.json());
 
 const processedCalls = new Set();
 
-/* ================= SMS ================= */
+/* ================= EMAIL NORMALIZATION ================= */
 
-async function sendSMS(lead) {try {const cleanPhone = lead.phone.replace(/\D/g, "").slice(-10);
+function normalizeEmail(raw) {
+  if (!raw) return null;
 
-const message = `Hey ${lead.firstName}, this is Mac with Green Machines.
-
-Got your request for ${lead.serviceNeeded}.
-
-We’ll take a look at your property and follow up shortly with details.`;
-
-const result = await client.messages.create({
-  body: message,
-  from: process.env.TWILIO_PHONE_NUMBER,
-  to: `+1${cleanPhone}`
-});
-
-console.log("SMS sent successfully:", result.sid);
-
-} catch (error) {console.error("SMS failed:", error.message);}}
+  return raw
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/at/g, "@")
+    .replace(/dot/g, ".");
+}
 
 /* ================= BROWSER ================= */
 
@@ -66,7 +60,7 @@ await frame.locator('input[name="phone"]').fill(lead.phone);
 
 await frame.locator('button.lh-btn-next:visible').click();
 
-/* STEP 2 - reacquire frame after next click */
+/* STEP 2 */
 frame = await getLawnProFrame(page);
 await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
   timeout: 60000
@@ -92,7 +86,7 @@ if (details) {
 
 await frame.locator('button.lh-btn-next:visible').click();
 
-/* STEP 3 - reacquire frame again */
+/* STEP 3 */
 frame = await getLawnProFrame(page);
 await frame.waitForSelector('input[name="addr_1"]', { timeout: 60000 });
 
@@ -139,6 +133,22 @@ if (!outputs) return res.sendStatus(200);
 
 const lead = Object.values(outputs)[0]?.result;
 
+/* ===== EMAIL OVERRIDE (NEW) ===== */
+if (lead?.emailRaw) {
+  const normalized = normalizeEmail(lead.emailRaw);
+
+  if (normalized) {
+    console.log("Email normalized from raw:", normalized);
+    lead.email = normalized;
+  }
+}
+
+/* ===== EMAIL VALIDATION (NEW) ===== */
+if (!lead.email || !lead.email.includes("@") || !lead.email.includes(".")) {
+  console.log("Invalid email — skipping:", lead.email);
+  return res.sendStatus(200);
+}
+
 if (!lead || !lead.leadComplete) {
   console.log("Lead not complete yet");
   return res.sendStatus(200);
@@ -166,7 +176,8 @@ if (cleanPhone.length !== 10) {
   return res.sendStatus(200);
 }
 
-await sendSMS(lead).catch(() => {});
+/* SMS REMOVED */
+
 await submitLeadWithPlaywright(lead);
 
 res.sendStatus(200);
