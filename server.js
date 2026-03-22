@@ -62,13 +62,13 @@ async function submitLeadWithPlaywright(lead) {
 
     /* STEP 2 */
     frame = await getLawnProFrame(page);
-    await frame.waitForSelector(`text=${lead.serviceNeeded}`, {
-      timeout: 60000
-    });
+    await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
+  timeout: 60000
+});
 
     console.log("Filling step 2");
 
-    await frame.locator(`text=${lead.serviceNeeded}`).first().click();
+    await frame.locator(`label:has(input[value="${lead.serviceNeeded}"])`).click();
 
     const details =
       lead.tellUsMore &&
@@ -169,15 +169,15 @@ app.post("/lead", async (req, res) => {
     lead.phone = cleanPhone;
 
     /* ===== PLACEHOLDER EMAIL (NEW) ===== */
-    if (!lead.email) {
-      const placeholderEmail = `${lead.firstName}.${lead.lastName}.${Date.now()}@noemail.greenmachines`;
+    if (!lead.email || lead.email === "null") {
+  const placeholderEmail = `${lead.firstName}.${lead.lastName}.${Date.now()}@noemail.greenmachines`;
 
-      lead.email = placeholderEmail
-        .toLowerCase()
-        .replace(/\s+/g, "");
+  lead.email = placeholderEmail
+    .toLowerCase()
+    .replace(/\s+/g, "");
 
-      console.log("Using placeholder email:", lead.email);
-    }
+  console.log("Using placeholder email:", lead.email);
+}
 
     await submitLeadWithPlaywright(lead);
 
