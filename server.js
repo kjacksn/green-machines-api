@@ -1,8 +1,10 @@
 import express from "express";
+import multer from "multer";
 import { chromium } from "playwright";
 
 const app = express();
 app.use(express.json());
+const upload = multer();
 
 const processedCalls = new Set();
 const LAWNPRO_LOGIN_URL = "https://secure.lawnprosoftware.com/login";
@@ -493,6 +495,19 @@ app.post("/lead", async (req, res) => {
       success: false,
       error: error instanceof Error ? error.message : "Internal server error"
     });
+  }
+});
+
+// ===== CARD ADDED WEBHOOK (NEW) =====
+
+app.post("/card-added", upload.none(), async (req, res) => {
+  try {
+    console.log("[CARD ADDED EMAIL RECEIVED]");
+    console.log(req.body.text || req.body.html);
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error("Card added webhook error:", error);
+    return res.sendStatus(200);
   }
 });
 
