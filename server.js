@@ -20,55 +20,141 @@ async function startBrowser() {
 }
 
 async function getLawnProFrame(page) {
-  const frameHandle = await page.waitForSelector(
-    'iframe[src*="lawnprosoftware"]',
-    { timeout: 60000 }
-  );
+  const iframeSelector = 'iframe[src*="lawnprosoftware"]';
+  const iframeElement = await page.waitForSelector(iframeSelector, {
+    state: "attached",
+    timeout: 60000
+  });
 
-  const frame = await frameHandle.contentFrame();
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const frame = await iframeElement.contentFrame();
 
-  if (!frame) {
-    throw new Error("Could not get LawnPro iframe content");
+    if (frame) {
+      await frame.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+      return frame;
+    }
+
+    await page.waitForTimeout(500);
   }
 
-  return frame;
+  throw new Error("Could not get LawnPro iframe content");
 }
 
-/* ================= FORM ================= */
+/* ================= VALIDATION / NORMALIZATION ================= */
 
-async function submitLeadWithPlaywright(lead) {
+function trimValue(value) {
+  return typeof value === "string" ? value.trim() : value;
+}
+
+function generatePlaceholderEmail(lead) {
+  const firstName = (lead.firstName || "lead").toLowerCase().replace(/\s+/g, "");
+  const lastName = (lead.lastName || "contact").toLowerCase().replace(/\s+/g, "");
+  return `${firstName}.${lastName}.${Date.now()}@noemail.greenmachines`;
+}
+
+function validateAndNormalizeLead(lead) {
+  if (!lead || typeof lead !== "object") {
+    return { success: false, error: "Missing lead payload", lead: null };
+  }
+
+  const normalizedLead = {
+    firstName: trimValue(lead.firstName) || "",
+    lastName: trimValue(lead.lastName) || "",
+    phone: trimValue(lead.phone) || "",
+    streetAddress: trimValue(lead.streetAddress) || "",
+    city: trimValue(lead.city) || "",
+    state: trimValue(lead.state) || "",
+    zip: trimValue(lead.zip) || "",
+    serviceNeeded: trimValue(lead.serviceNeeded) || "",
+    tellUsMore: lead.tellUsMore == null ? null : trimValue(lead.tellUsMore) || null,
+    leadComplete: lead.leadComplete === true
+  };
+
+  const requiredFields = [
+    "firstName",
+    "lastName",
+    "phone",
+    "streetAddress",
+    "city",
+    "state",
+    "zip"
+  ];
+
+  for (const field of requiredFields) {
+    if (!normalizedLead[field]) {
+      return { success: false, error: `Missing required field: ${field}`, lead: null };
+    }
+  }
+
+  if (!normalizedLead.leadComplete) {
+    return { success: false, error: "leadComplete must be true", lead: null };
+  }
+
+  const phoneDigits = normalizedLead.phone.replace(/\D/g, "");
+
+  if (phoneDigits.length !== 10) {
+    return { success: false, error: "Phone must contain exactly 10 digits", lead: null };
+  }
+
+  normalizedLead.phone = phoneDigits;
+
+  return { success: true, error: null, lead: normalizedLead };
+}
+
+/* ================= PLAYWRIGHT ================= */
+
+async function clickNextButton(frame) {
+  const nextButton = frame.locator("button.lh-btn-next:visible").first();
+  await nextButton.waitFor({ state: "visible", timeout: 60000 });
+  await nextButton.click();
+}
+
+async function waitForSubmissionConfirmation(page, frame) {
+  await Promise.race([
+    frame.waitForSelector('button:has-text("Submit")', {
+      state: "detached",
+      timeout: 15000
+    }),
+    frame.waitForSelector("text=/thank you|thanks|submitted|we received/i", {
+      timeout: 15000
+    }),
+    page.waitForLoadState("networkidle", { timeout: 15000 })
+  ]).catch(() => {
+    throw new Error("Submission confirmation was not detected");
+  });
+}
+
+async function submitLeadWithPlaywrightOnce(lead) {
   const page = await browser.newPage();
 
   try {
-    console.log("Opening website...");
-
     await page.goto(
       "https://www.greenmachineslawncare.com/#GetaFreeQuote",
-      { waitUntil: "networkidle", timeout: 60000 }
+      { waitUntil: "domcontentloaded", timeout: 60000 }
     );
 
     /* STEP 1 */
     let frame = await getLawnProFrame(page);
-    await frame.waitForSelector('input[name="first_name"]', { timeout: 60000 });
-
-    console.log("Filling step 1");
+    await frame.waitForSelector('input[name="first_name"]', {
+      state: "visible",
+      timeout: 60000
+    });
 
     await frame.locator('input[name="first_name"]').fill(lead.firstName);
     await frame.locator('input[name="last_name"]').fill(lead.lastName);
     await frame.locator('input[name="email"]').fill(lead.email);
     await frame.locator('input[name="phone"]').fill(lead.phone);
 
-    await frame.locator('button.lh-btn-next:visible').click();
+    await clickNextButton(frame);
 
     /* STEP 2 */
     frame = await getLawnProFrame(page);
-    await frame.waitForSelector(`label:has(input[value="${lead.serviceNeeded}"])`, {
-  timeout: 60000
-});
 
-    console.log("Filling step 2");
-
-    await frame.locator(`label:has(input[value="${lead.serviceNeeded}"])`).click();
+    if (lead.serviceNeeded) {
+      const serviceOption = frame.locator(`label:has(input[value="${lead.serviceNeeded}"])`).first();
+      await serviceOption.waitFor({ state: "visible", timeout: 60000 });
+      await serviceOption.click();
+    }
 
     const details =
       lead.tellUsMore &&
@@ -78,46 +164,72 @@ async function submitLeadWithPlaywright(lead) {
         : "";
 
     if (details) {
-      const detailsField = frame.locator('[name="request_details"]');
+      const detailsField = frame.locator('[name="request_details"]').first();
       if (await detailsField.count()) {
         await detailsField.fill(details);
       }
     }
 
-    await frame.locator('button.lh-btn-next:visible').click();
+    await clickNextButton(frame);
 
     /* STEP 3 */
     frame = await getLawnProFrame(page);
-    await frame.waitForSelector('input[name="addr_1"]', { timeout: 60000 });
-
-    console.log("Filling step 3");
+    await frame.waitForSelector('input[name="addr_1"]', {
+      state: "visible",
+      timeout: 60000
+    });
 
     await frame.locator('input[name="addr_1"]').fill(lead.streetAddress);
     await frame.locator('input[name="city"]').fill(lead.city);
     await frame.locator('input[name="state"]').fill(lead.state);
     await frame.locator('input[name="zip"]').fill(lead.zip);
-    await frame.locator('input[type="checkbox"]').check();
 
-    console.log("Submitting form");
+    const consentCheckbox = frame.locator('input[type="checkbox"]').first();
+    await consentCheckbox.waitFor({ state: "visible", timeout: 60000 });
+    await consentCheckbox.check();
 
-    await frame.locator('button:has-text("Submit")').click();
+    const submitButton = frame.locator('button:has-text("Submit")').first();
+    await submitButton.waitFor({ state: "visible", timeout: 60000 });
+    await submitButton.click();
 
-    await page.waitForTimeout(4000);
+    await waitForSubmissionConfirmation(page, frame);
 
-    console.log("Submission attempted");
+    return { success: true, error: null };
   } catch (error) {
-    console.error("Playwright error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
   } finally {
     await page.close();
   }
+}
+
+async function submitLeadWithPlaywright(lead) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`[PLAYWRIGHT ATTEMPT ${attempt}]`);
+
+    const result = await submitLeadWithPlaywrightOnce(lead);
+
+    if (result.success) {
+      console.log("[PLAYWRIGHT SUCCESS]");
+      return result;
+    }
+
+    lastError = result.error;
+  }
+
+  console.log(`[PLAYWRIGHT FAILED: ${lastError}]`);
+  return {
+    success: false,
+    error: lastError || "Unknown Playwright error"
+  };
 }
 
 /* ================= WEBHOOK ================= */
 
 app.post("/lead", async (req, res) => {
   try {
-    console.log("Webhook received");
-
     const callId = req.body?.call?.id;
 
     if (callId && processedCalls.has(callId)) {
@@ -139,52 +251,39 @@ app.post("/lead", async (req, res) => {
 
     const lead = Object.values(outputs)[0]?.result;
 
-    if (!lead || !lead.leadComplete) {
-      console.log("Lead not complete yet");
+    if (!lead) {
       return res.sendStatus(200);
     }
 
-    console.log("Lead captured:", lead);
+    console.log("[LEAD RECEIVED]", lead);
 
-    const missingFields = [];
+    const validationResult = validateAndNormalizeLead(lead);
 
-    if (!lead.phone) missingFields.push("phone");
-    if (!lead.streetAddress) missingFields.push("streetAddress");
-    if (!lead.city) missingFields.push("city");
-    if (!lead.state) missingFields.push("state");
-    if (!lead.zip) missingFields.push("zip");
-
-    if (missingFields.length > 0) {
-      console.log("Incomplete lead — skipping automation:", missingFields);
-      return res.sendStatus(200);
+    if (!validationResult.success) {
+      console.log(`[VALIDATION FAILED: ${validationResult.error}]`);
+      return res.status(200).json({
+        success: false,
+        error: validationResult.error
+      });
     }
 
-    const cleanPhone = lead.phone.replace(/\D/g, "").slice(-10);
+    console.log("[VALIDATION PASSED]");
 
-    if (cleanPhone.length !== 10) {
-      console.log("Invalid phone number — skipping:", lead.phone);
-      return res.sendStatus(200);
-    }
+    const normalizedLead = validationResult.lead;
+    const submissionLead = {
+      ...normalizedLead,
+      email: generatePlaceholderEmail(normalizedLead)
+    };
 
-    lead.phone = cleanPhone;
+    const submissionResult = await submitLeadWithPlaywright(submissionLead);
 
-    /* ===== PLACEHOLDER EMAIL (NEW) ===== */
-    if (!lead.email || lead.email === "null") {
-  const placeholderEmail = `${lead.firstName}.${lead.lastName}.${Date.now()}@noemail.greenmachines`;
-
-  lead.email = placeholderEmail
-    .toLowerCase()
-    .replace(/\s+/g, "");
-
-  console.log("Using placeholder email:", lead.email);
-}
-
-    await submitLeadWithPlaywright(lead);
-
-    res.sendStatus(200);
+    return res.status(200).json(submissionResult);
   } catch (error) {
     console.error("Server error:", error);
-    res.sendStatus(500);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Internal server error"
+    });
   }
 });
 
