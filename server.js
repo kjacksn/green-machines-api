@@ -5,6 +5,7 @@ const app = express();
 app.use(express.json());
 
 const processedCalls = new Set();
+const LAWNPRO_LOGIN_URL = "https://secure.lawnprosoftware.com/login";
 
 /* ================= BROWSER ================= */
 
@@ -124,6 +125,98 @@ async function waitForSubmissionConfirmation(page, frame) {
   });
 }
 
+function logStep(tag, message) {
+  console.log(`[${tag}] ${message}`);
+}
+
+async function isVisible(locator, timeout = 1500) {
+  try {
+    await locator.waitFor({ state: "visible", timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function dismissNotificationPrompt(page) {
+  const noThanksButton = page.getByRole("button", { name: "No Thanks" });
+  if (await isVisible(noThanksButton, 1200)) {
+    logStep("NAVIGATION", "Dismissing notification prompt");
+    await noThanksButton.click();
+  }
+}
+
+async function collapseSidebarOverlay(page) {
+  const overlayIsBlocking = await page
+    .locator("#sidebar_container__overlay")
+    .evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.pointerEvents !== "none" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    })
+    .catch(() => false);
+
+  if (!overlayIsBlocking) {
+    return;
+  }
+
+  const menuToggle = page.locator("#menuToggleBtn");
+  if (!(await isVisible(menuToggle, 1500))) {
+    throw new Error("Sidebar overlay is blocking the page and the menu toggle is not available.");
+  }
+
+  logStep("NAVIGATION", "Closing sidebar overlay");
+  await menuToggle.click();
+  await page.waitForTimeout(300);
+}
+
+async function preparePage(page) {
+  await dismissNotificationPrompt(page);
+  await collapseSidebarOverlay(page);
+}
+
+async function requireVisible(locator, description, timeout = 10000) {
+  try {
+    await locator.waitFor({ state: "visible", timeout });
+    return locator;
+  } catch {
+    throw new Error(`Expected "${description}" to be visible, but it was not found.`);
+  }
+}
+
+async function clickRequired(locator, description, timeout = 10000) {
+  await requireVisible(locator, description, timeout);
+  try {
+    await locator.click();
+  } catch (error) {
+    throw new Error(`Could not click "${description}": ${error.message}`);
+  }
+}
+
+async function fillRequired(locator, value, description, timeout = 10000) {
+  await requireVisible(locator, description, timeout);
+  try {
+    await locator.fill(value);
+  } catch (error) {
+    throw new Error(`Could not fill "${description}": ${error.message}`);
+  }
+}
+
+async function selectRequired(locator, optionLabel, description, timeout = 10000) {
+  await requireVisible(locator, description, timeout);
+  try {
+    await locator.selectOption({ label: optionLabel });
+  } catch (error) {
+    throw new Error(`Could not select "${optionLabel}" in "${description}": ${error.message}`);
+  }
+}
+
 async function submitLeadWithPlaywrightOnce(lead) {
   const page = await browser.newPage();
 
@@ -226,6 +319,117 @@ async function submitLeadWithPlaywright(lead) {
   };
 }
 
+/* ================= ACTIVATION FUNCTION ================= */
+
+async function activateCustomerInLawnPro(lead) {
+  const email = process.env.LAWNPRO_EMAIL;
+  const password = process.env.LAWNPRO_PASSWORD;
+  const phone = lead.phone;
+  const fallbackName = `${lead.firstName} ${lead.lastName}`;
+  const page = await browser.newPage();
+  let customerPage = null;
+
+  console.log("[ACTIVATION START]");
+
+  try {
+    if (!email || !password) {
+      throw new Error("LAWNPRO_EMAIL and LAWNPRO_PASSWORD must be set in the environment.");
+    }
+
+    await page.goto(LAWNPRO_LOGIN_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
+    });
+
+    const emailField = page.getByRole("textbox", { name: "Email" });
+
+    if (await isVisible(emailField, 2000)) {
+      await fillRequired(emailField, email, "Email field");
+      await fillRequired(page.getByRole("textbox", { name: "Password" }), password, "Password field");
+      await clickRequired(page.getByRole("button", { name: "Log In" }), "Log In button");
+      await page.waitForURL(/secure\.lawnprosoftware\.com\/?$/, { timeout: 20000 });
+    }
+
+    await preparePage(page);
+
+    console.log("[ACTIVATION NAVIGATION]");
+    await clickRequired(page.locator('a.nav-link:has-text("Customers")').first(), "Customers sidebar link");
+    await clickRequired(
+      page.locator('a.dropdown-item:has-text("Work Requests")').first(),
+      "Work Requests submenu link"
+    );
+
+    await page.waitForURL(/\/customers\/work_requests/, { timeout: 20000 });
+    await preparePage(page);
+
+    console.log("[ACTIVATION SEARCH]");
+    let targetRow = page.locator("tr", { hasText: phone }).first();
+
+    if ((await targetRow.count()) === 0) {
+      targetRow = page.locator("tr", { hasText: fallbackName }).first();
+    }
+
+    if ((await targetRow.count()) === 0) {
+      throw new Error(`No work request row matched ${phone} or ${fallbackName}.`);
+    }
+
+    await requireVisible(targetRow, "target customer row");
+    await clickRequired(
+      targetRow.locator('a[href*="/customers/work_requests/view/"]').first(),
+      "work request view button"
+    );
+
+    await page.waitForURL(/\/customers\/work_requests\/view\//, { timeout: 20000 });
+    await preparePage(page);
+
+    [customerPage] = await Promise.all([
+      page.waitForEvent("popup", { timeout: 10000 }),
+      clickRequired(page.getByRole("link", { name: "View Customer" }), "View Customer button")
+    ]);
+
+    await customerPage.waitForLoadState("domcontentloaded");
+    await preparePage(customerPage);
+
+    const statusLink = customerPage.locator("#custom_status");
+    await requireVisible(statusLink, "Status field");
+
+    const currentStatus = (await statusLink.textContent())?.trim() || "";
+
+    if (currentStatus !== "Active") {
+      await clickRequired(statusLink, "Status field");
+
+      const statusDropdown = customerPage
+        .locator("form")
+        .filter({ hasText: "Written off With Balance Remaining" })
+        .getByRole("combobox");
+
+      await selectRequired(statusDropdown, "Active", "Status dropdown");
+
+      const confirmationDialog = customerPage.getByRole("dialog");
+      await requireVisible(confirmationDialog, "activation confirmation popup");
+      await clickRequired(confirmationDialog.getByRole("button", { name: "Yes" }), "Yes button");
+
+      await requireVisible(
+        customerPage.locator("#custom_status").filter({ hasText: "Active" }),
+        "Active status"
+      );
+    }
+
+    console.log("[ACTIVATION SUCCESS]");
+    return { success: true, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`[ACTIVATION FAILED: ${message}]`);
+    return { success: false, error: message };
+  } finally {
+    if (customerPage && !customerPage.isClosed()) {
+      await customerPage.close().catch(() => {});
+    }
+
+    await page.close().catch(() => {});
+  }
+}
+
 /* ================= WEBHOOK ================= */
 
 app.post("/lead", async (req, res) => {
@@ -276,6 +480,11 @@ app.post("/lead", async (req, res) => {
     };
 
     const submissionResult = await submitLeadWithPlaywright(submissionLead);
+
+    /* ================= INTEGRATION POINT ================= */
+    if (submissionResult.success) {
+      await activateCustomerInLawnPro(submissionLead);
+    }
 
     return res.status(200).json(submissionResult);
   } catch (error) {
