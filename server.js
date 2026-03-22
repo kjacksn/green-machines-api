@@ -498,12 +498,17 @@ app.post("/lead", async (req, res) => {
   }
 });
 
-// ===== CARD ADDED WEBHOOK (NEW) =====
+// ===== CARD ADDED WEBHOOK (DEBUG UPDATED) =====
 
 app.post("/card-added", upload.none(), async (req, res) => {
   try {
     console.log("[CARD ADDED EMAIL RECEIVED]");
-    console.log(req.body.text || req.body.html);
+    console.log("FULL BODY:", req.body);
+    console.log("BODY KEYS:", Object.keys(req.body));
+    console.log("TEXT:", req.body.text);
+    console.log("HTML:", req.body.html);
+    console.log("SUBJECT:", req.body.subject);
+    console.log("FROM:", req.body.from);
     return res.sendStatus(200);
   } catch (error) {
     console.error("Card added webhook error:", error);
