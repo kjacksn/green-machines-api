@@ -498,17 +498,21 @@ app.post("/lead", async (req, res) => {
   }
 });
 
-// ===== CARD ADDED WEBHOOK (DEBUG UPDATED) =====
+// ===== CARD ADDED WEBHOOK (MESSAGE EXTRACTION) =====
 
 app.post("/card-added", upload.none(), async (req, res) => {
   try {
     console.log("[CARD ADDED EMAIL RECEIVED]");
-    console.log("FULL BODY:", req.body);
-    console.log("BODY KEYS:", Object.keys(req.body));
-    console.log("TEXT:", req.body.text);
-    console.log("HTML:", req.body.html);
-    console.log("SUBJECT:", req.body.subject);
-    console.log("FROM:", req.body.from);
+    const rawEmail = req.body.email || "";
+    const match = rawEmail.match(/(.+just added a credit card.+)/i);
+
+    if (match) {
+      const message = match[1];
+      console.log("EXTRACTED MESSAGE:", message);
+    } else {
+      console.log("No message found in email");
+    }
+
     return res.sendStatus(200);
   } catch (error) {
     console.error("Card added webhook error:", error);
