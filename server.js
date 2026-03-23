@@ -1,5 +1,6 @@
 import express from "express";
 import multer from "multer";
+import sgMail from "@sendgrid/mail";
 import { chromium } from "playwright";
 
 const app = express();
@@ -53,6 +54,21 @@ function generatePlaceholderEmail(lead) {
   const firstName = (lead.firstName || "lead").toLowerCase().replace(/\s+/g, "");
   const lastName = (lead.lastName || "contact").toLowerCase().replace(/\s+/g, "");
   return `${firstName}.${lastName}.${Date.now()}@noemail.greenmachines`;
+}
+
+async function sendCustomerMessageEmail({ firstName, phone, message }) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+  await sgMail.send({
+    to: process.env.NOTIFICATION_EMAIL,
+    from: process.env.SENDGRID_FROM_EMAIL,
+    subject: "Customer Call – Message Received",
+    text: `Name: ${firstName || "Not provided"}
+Phone: ${phone || "Not provided"}
+
+Message:
+${message || "Not provided"}`
+  });
 }
 
 function validateAndNormalizeLead(lead) {
@@ -483,6 +499,19 @@ app.post("/lead", async (req, res) => {
       return res.sendStatus(200);
     }
 
+    const callType = lead.callType || "new_service";
+
+    if (callType === "existing_customer") {
+      console.log("[EXISTING CUSTOMER MESSAGE RECEIVED]");
+      await sendCustomerMessageEmail({
+        firstName: lead.firstName,
+        phone: lead.phone,
+        message: lead.message
+      });
+      return res.status(200).json({ success: true });
+    }
+
+    console.log("[NEW SERVICE LEAD]");
     console.log("[LEAD RECEIVED]", lead);
 
     const validationResult = validateAndNormalizeLead(lead);
