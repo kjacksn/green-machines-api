@@ -498,7 +498,7 @@ app.post("/lead", async (req, res) => {
   }
 });
 
-// ===== CARD ADDED WEBHOOK (MESSAGE EXTRACTION) =====
+// ===== CARD ADDED WEBHOOK (NAME EXTRACTION) =====
 
 app.post("/card-added", upload.none(), async (req, res) => {
   try {
@@ -509,6 +509,15 @@ app.post("/card-added", upload.none(), async (req, res) => {
     if (match) {
       const message = match[1];
       console.log("EXTRACTED MESSAGE:", message);
+
+      const nameMatch = message.match(/^(.+?) just added a credit card/i);
+
+      if (nameMatch) {
+        const customerName = nameMatch[1].trim();
+        console.log("CUSTOMER NAME:", customerName);
+      } else {
+        console.log("Could not extract customer name");
+      }
     } else {
       console.log("No message found in email");
     }
