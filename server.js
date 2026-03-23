@@ -494,6 +494,7 @@ app.post("/lead", async (req, res) => {
     if (!outputs) return res.sendStatus(200);
 
     const lead = Object.values(outputs)[0]?.result;
+    console.log("[CALL DATA]", lead);
 
     if (!lead) {
       return res.sendStatus(200);
@@ -506,7 +507,7 @@ app.post("/lead", async (req, res) => {
       await sendCustomerMessageEmail({
         firstName: lead.firstName,
         phone: lead.phone,
-        message: lead.message
+        message: lead.message || lead.tellUsMore || lead.requestDetails || lead.notes || lead.details || "Not provided"
       });
       return res.status(200).json({ success: true });
     }
