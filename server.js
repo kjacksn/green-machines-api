@@ -321,13 +321,24 @@ async function submitLeadWithPlaywright(lead) {
   };
 }
 
-/* ================= ACTIVATION FUNCTION ================= */
+// ===== CARD ADDED AUTOMATION (REUSED ACTIVATION + EMAIL SYNC) =====
 
-async function activateCustomerInLawnPro(lead) {
+async function syncCustomerPortalEmail(customerPage) {
+  console.log("[EMAIL SYNC START]");
+
+  // TODO: Add verified selectors for the Customer Portal email and Contact Info email field.
+  // The current codebase does not include the required selectors, so this step is intentionally
+  // left unimplemented to avoid fabricating brittle Playwright interactions.
+  console.log("[EMAIL SYNC TODO: verified selectors required for portal email extraction and contact email update]");
+
+  return { success: false, error: "Verified selectors required for portal email sync" };
+}
+
+async function activateCustomerInLawnPro(customer) {
   const email = process.env.LAWNPRO_EMAIL;
   const password = process.env.LAWNPRO_PASSWORD;
-  const phone = lead.phone;
-  const fallbackName = `${lead.firstName} ${lead.lastName}`;
+  const phone = customer.phone || "";
+  const fallbackName = customer.customerName || `${customer.firstName || ""} ${customer.lastName || ""}`.trim();
   const page = await browser.newPage();
   let customerPage = null;
 
@@ -365,9 +376,13 @@ async function activateCustomerInLawnPro(lead) {
     await preparePage(page);
 
     console.log("[ACTIVATION SEARCH]");
-    let targetRow = page.locator("tr", { hasText: phone }).first();
+    let targetRow = null;
 
-    if ((await targetRow.count()) === 0) {
+    if (phone) {
+      targetRow = page.locator("tr", { hasText: phone }).first();
+    }
+
+    if (!targetRow || (await targetRow.count()) === 0) {
       targetRow = page.locator("tr", { hasText: fallbackName }).first();
     }
 
@@ -417,6 +432,8 @@ async function activateCustomerInLawnPro(lead) {
       );
     }
 
+    await syncCustomerPortalEmail(customerPage);
+
     console.log("[ACTIVATION SUCCESS]");
     return { success: true, error: null };
   } catch (error) {
@@ -430,6 +447,11 @@ async function activateCustomerInLawnPro(lead) {
 
     await page.close().catch(() => {});
   }
+}
+
+async function handleCardAdded(customerName) {
+  console.log("[CARD ADDED AUTOMATION START]");
+  return activateCustomerInLawnPro({ customerName });
 }
 
 /* ================= WEBHOOK ================= */
@@ -483,11 +505,6 @@ app.post("/lead", async (req, res) => {
 
     const submissionResult = await submitLeadWithPlaywright(submissionLead);
 
-    /* ================= INTEGRATION POINT ================= */
-    if (submissionResult.success) {
-      await activateCustomerInLawnPro(submissionLead);
-    }
-
     return res.status(200).json(submissionResult);
   } catch (error) {
     console.error("Server error:", error);
@@ -515,6 +532,7 @@ app.post("/card-added", upload.none(), async (req, res) => {
       if (nameMatch) {
         const customerName = nameMatch[1].trim();
         console.log("CUSTOMER NAME:", customerName);
+        await handleCardAdded(customerName);
       } else {
         console.log("Could not extract customer name");
       }
